@@ -399,7 +399,6 @@ public extension SignalProtocol {
             observer.completed()
           }
         }
-
       }
     }
   }
