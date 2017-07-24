@@ -226,7 +226,7 @@ public extension SignalProtocol {
   }
 
   /// Transform error by applying `transform` on it.
-  public func mapError<F: Swift.Error>(transform: @escaping (Error) -> F) -> Signal<Element, F> {
+  public func mapError<F>(transform: @escaping (Error) -> F) -> Signal<Element, F> {
     return Signal { observer in
       return self.observe { event in
         switch event {
@@ -679,7 +679,7 @@ extension SignalProtocol {
 
   /// Set the execution context in which to execute the signal (i.e. in which to run
   /// the signal's producer).
-  public func executeIn(_ context: ExecutionContext) -> Signal<Element, Error> {
+  public func executeIn(_ context: @escaping ExecutionContext) -> Signal<Element, Error> {
     return Signal { observer in
       let serialDisposable = SerialDisposable(otherDisposable: nil)
       context {
@@ -766,7 +766,7 @@ extension SignalProtocol {
 
   /// Set the execution context in which to dispatch events (i.e. in which to run
   /// observers).
-  public func observeIn(_ context: ExecutionContext) -> Signal<Element, Error> {
+  public func observeIn(_ context: @escaping ExecutionContext) -> Signal<Element, Error> {
     return Signal { observer in
       return self.observe { event in
         context {
@@ -1347,7 +1347,7 @@ extension SignalProtocol {
 extension SignalProtocol where Error == NoError {
 
   /// Safe error casting from NoError to some Error type.
-  public func castError<E: Swift.Error>() -> Signal<Element, E> {
+  public func castError<E>() -> Signal<Element, E> {
     return Signal { observer in
       return self.observe { event in
         switch event {
@@ -1378,7 +1378,7 @@ extension SignalProtocol where Error == NoError {
   }
 
   /// Transform each element by applying `transform` on it.
-  public func tryMap<U, E: Swift.Error>(transform: @escaping (Element) -> Result<U, E>) -> Signal<U, E> {
+  public func tryMap<U, E>(transform: @escaping (Element) -> Result<U, E>) -> Signal<U, E> {
     return Signal { observer in
       return self.observe { event in
         switch event {
