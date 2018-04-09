@@ -254,7 +254,7 @@ public extension SignalProtocol {
   }
 
   /// Transform error by applying `transform` on it.
-  public func mapError<F>(_ transform: @escaping (Error) -> F) -> Signal<Element, F> {
+  public func mapError<F>(transform: @escaping (Error) -> F) -> Signal<Element, F> {
     return Signal { observer in
       return self.observe { event in
         switch event {
@@ -492,7 +492,6 @@ public extension SignalProtocol {
             observer.completed()
           }
         }
-
       }
     }
   }
@@ -846,7 +845,7 @@ extension SignalProtocol {
 
   /// Set the execution context in which to execute the signal (i.e. in which to run
   /// the signal's producer).
-  public func executeIn(_ context: ExecutionContext) -> Signal<Element, Error> {
+  public func executeIn(_ context: @escaping ExecutionContext) -> Signal<Element, Error> {
     return Signal { observer in
       let serialDisposable = SerialDisposable(otherDisposable: nil)
       context.execute {
@@ -932,8 +931,9 @@ extension SignalProtocol {
     })
   }
 
-  /// Set the execution context used to dispatch events (i.e. to run the observers).
-  public func observeIn(_ context: ExecutionContext) -> Signal<Element, Error> {
+  /// Set the execution context in which to dispatch events (i.e. in which to run
+  /// observers).
+  public func observeIn(_ context: @escaping ExecutionContext) -> Signal<Element, Error> {
     return Signal { observer in
       return self.observe { event in
         context.execute {
@@ -1638,7 +1638,7 @@ extension SignalProtocol where Error == NoError {
   }
 
   /// Transform each element by applying `transform` on it.
-  public func tryMap<U, E>(_ transform: @escaping (Element) -> Result<U, E>) -> Signal<U, E> {
+  public func tryMap<U, E>(transform: @escaping (Element) -> Result<U, E>) -> Signal<U, E> {
     return Signal { observer in
       return self.observe { event in
         switch event {
