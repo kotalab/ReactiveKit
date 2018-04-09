@@ -22,36 +22,17 @@
 //  THE SOFTWARE.
 //
 
-import Foundation
+public typealias Signal1<Element> = Signal<Element, NoError>
+public typealias SafeSignal<Element> = Signal<Element, NoError>
 
-/// Common lock interface.
-public protocol Lock {
-  func lock()
-  func unlock()
-}
+public typealias Observer1<Element> = (Event<Element, NoError>) -> Void
+public typealias SafeObserver<Element> = (Event<Element, NoError>) -> Void
 
-public extension Lock {
+public typealias PublishSubject1<Element> = PublishSubject<Element, NoError>
+public typealias SafePublishSubject<Element> = PublishSubject<Element, NoError>
 
-  public func atomic<T>(body: () -> T) -> T {
-    lock(); defer { unlock() }
-    return body()
-  }
-}
+public typealias ReplaySubject1<Element> = ReplaySubject<Element, NoError>
+public typealias SafeReplaySubject<Element> = ReplaySubject<Element, NoError>
 
-/// Lock
-extension NSLock: Lock {
-
-  public convenience init(name: String) {
-    self.init()
-    self.name = name
-  }
-}
-
-/// Recursive Lock
-extension NSRecursiveLock: Lock {
-
-  public convenience init(name: String) {
-    self.init()
-    self.name = name
-  }
-}
+public typealias ReplayOneSubject1<Element> = ReplayOneSubject<Element, NoError>
+public typealias SafeReplayOneSubject<Element> = ReplayOneSubject<Element, NoError>

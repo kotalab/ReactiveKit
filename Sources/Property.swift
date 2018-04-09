@@ -22,6 +22,8 @@
 //  THE SOFTWARE.
 //
 
+import Foundation
+
 /// Represents mutable state that can be observed as a signal of events.
 public protocol PropertyProtocol {
   associatedtype ProperyElement
@@ -29,11 +31,11 @@ public protocol PropertyProtocol {
 }
 
 /// Represents mutable state that can be observed as a signal of events.
-public class Property<Value>: PropertyProtocol, SignalProtocol, SubjectProtocol, BindableProtocol {
+public class Property<Value>: PropertyProtocol, SubjectProtocol, BindableProtocol {
 
   private var _value: Value
   private let subject = PublishSubject<Value, NoError>()
-  private let lock = NSRecursiveLock(name: "ReactiveKit.Property")
+  private let lock = NSRecursiveLock(name: "com.reactivekit.property")
 
   public var disposeBag: DisposeBag {
     return subject.disposeBag
@@ -42,13 +44,13 @@ public class Property<Value>: PropertyProtocol, SignalProtocol, SubjectProtocol,
   /// Underlying value. Changing it emits `.next` event with new value.
   public var value: Value {
     get {
-      return lock.atomic { _value }
+      lock.lock(); defer { lock.unlock() }
+      return _value
     }
     set {
-      lock.atomic {
-        _value = newValue
-        subject.next(newValue)
-      }
+      lock.lock(); defer { lock.unlock() }
+      _value = newValue
+      subject.next(newValue)
     }
   }
 
@@ -58,27 +60,32 @@ public class Property<Value>: PropertyProtocol, SignalProtocol, SubjectProtocol,
 
   public func on(_ event: Event<Value, NoError>) {
     if case .next(let element) = event {
-      self._value = element
+      _value = element
     }
     subject.on(event)
   }
 
   public func observe(with observer: @escaping (Event<Value, NoError>) -> Void) -> Disposable {
-    observer(.next(value))
-    return subject.observe(with: observer)
+    return subject.start(with: value).observe(with: observer)
   }
 
   public var readOnlyView: AnyProperty<Value> {
     return AnyProperty(property: self)
   }
 
-  /// Change the underlying value withouth notifying the observers.
+  /// Change the underlying value without notifying the observers.
   public func silentUpdate(value: Value) {
     _value = value
   }
 
   public func bind(signal: Signal<Value, NoError>) -> Disposable {
-    return subject.bind(signal: signal)
+    return signal
+      .take(until: disposeBag.deallocated)
+      .observeIn(.nonRecursive())
+      .observeNext { [weak self] element in
+        guard let s = self else { return }
+        s.on(.next(element))
+      }
   }
 
   deinit {

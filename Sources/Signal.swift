@@ -22,46 +22,23 @@
 //  THE SOFTWARE.
 //
 
-import Foundation
-
-// MARK: - Signal
-
-/// A Signal represents a stream of elements.
+/// A signal represents a sequence of elements.
 public struct Signal<Element, Error: Swift.Error>: SignalProtocol {
 
-  private let producer: (Observer<Element, Error>) -> Disposable
+  public typealias Producer = (AtomicObserver<Element, Error>) -> Disposable
+
+  private let producer: Producer
 
   /// Create new signal given a producer closure.
-  public init(producer: @escaping (Observer<Element, Error>) -> Disposable) {
+  public init(producer: @escaping Producer) {
     self.producer = producer
   }
 
-  /// Register an observer that will receive events from the signal.
-  public func observe(with observer: @escaping (Event<Element, Error>) -> Void) -> Disposable {
+  /// Register the observer that will receive events from the signal.
+  public func observe(with observer: @escaping Observer<Element, Error>) -> Disposable {
     let serialDisposable = SerialDisposable(otherDisposable: nil)
-    let lock = NSRecursiveLock(name: "com.ReactiveKit.Signal.observe")
-    var terminated = false
-    let observer = Observer<Element, Error> { event in
-      lock.atomic {
-        guard !serialDisposable.isDisposed && !terminated else { return }
-        if event.isTerminal {
-          terminated = true
-          observer(event)
-          serialDisposable.dispose()
-        } else {
-          observer(event)
-        }
-      }
-    }
+    let observer = AtomicObserver(disposable: serialDisposable, observer: observer)
     serialDisposable.otherDisposable = producer(observer)
-    return serialDisposable
-  }
-
-  public func toSignal() -> Signal<Element, Error> {
-    return self
+    return observer.disposable
   }
 }
-
-/// A convenience alias for non-failable signals.
-public typealias Signal1<Element> = Signal<Element, NoError>
-

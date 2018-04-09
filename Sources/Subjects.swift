@@ -22,50 +22,85 @@
 //  THE SOFTWARE.
 //
 
+import Foundation
+
 /// A type that is both a signal and an observer.
 public protocol SubjectProtocol: SignalProtocol, ObserverProtocol {
 }
 
 /// A type that is both a signal and an observer.
-public final class PublishSubject<Element, Error: Swift.Error>: ObserverRegister<(Event<Element, Error>) -> Void>, SubjectProtocol {
+open class Subject<Element, Error: Swift.Error>: SubjectProtocol {
 
-  private let lock = NSRecursiveLock(name: "PublishSubject")
+  private typealias Token = Int64
+  private var nextToken: Token = 0
+
+  private var observers: [Token: Observer<Element, Error>] = [:]
   private var terminated = false
 
+  public let lock = NSRecursiveLock(name: "com.reactivekit.subject")
   public let disposeBag = DisposeBag()
 
-  public override init() {
-  }
+  public init() {}
 
   public func on(_ event: Event<Element, Error>) {
-    lock.atomic {
-      guard !terminated else { return }
-      terminated = event.isTerminal
-      forEachObserver { $0(event) }
+    lock.lock(); defer { lock.unlock() }
+    guard !terminated else { return }
+    terminated = event.isTerminal
+    send(event)
+  }
+
+  open func send(_ event: Event<Element, Error>) {
+    forEachObserver { $0(event) }
+  }
+
+  open func observe(with observer: @escaping Observer<Element, Error>) -> Disposable {
+    lock.lock(); defer { lock.unlock() }
+    willAdd(observer: observer)
+    return add(observer: observer)
+  }
+
+  open func willAdd(observer: @escaping Observer<Element, Error>) {
+  }
+
+  private func add(observer: @escaping Observer<Element, Error>) -> Disposable {
+    let token = nextToken
+    nextToken = nextToken + 1
+
+    observers[token] = observer
+
+    return BlockDisposable { [weak self] in
+      let _ = self?.observers.removeValue(forKey: token)
     }
   }
 
-  public func observe(with observer: @escaping (Event<Element, Error>) -> Void) -> Disposable {
-    return add(observer: observer)
+  private func forEachObserver(_ execute: (Observer<Element, Error>) -> Void) {
+    for (_, observer) in observers {
+      execute(observer)
+    }
   }
 }
 
-extension PublishSubject: BindableProtocol {
-  
-  public func bind(signal: Signal<Element, Error>) -> Disposable {
-    return signal.take(until: disposeBag.deallocated).observe(with: self.on)
+extension Subject: BindableProtocol {
+
+  public func bind(signal: Signal<Element, NoError>) -> Disposable {
+    return signal
+      .take(until: disposeBag.deallocated)
+      .observeIn(.nonRecursive())
+      .observeNext { [weak self] element in
+        guard let s = self else { return }
+        s.on(.next(element))
+    }
   }
 }
 
-public typealias PublishSubject1<Element> = PublishSubject<Element, NoError>
+/// A subject that propagates received events to the registered observes.
+public final class PublishSubject<Element, Error: Swift.Error>: Subject<Element, Error> {}
 
-public final class ReplaySubject<Element, Error: Swift.Error>: ObserverRegister<(Event<Element, Error>) -> Void>, SubjectProtocol {
+/// A subject that replies accumulated sequence of events to each observer.
+public final class ReplaySubject<Element, Error: Swift.Error>: Subject<Element, Error> {
 
   private var buffer: ArraySlice<Event<Element, Error>> = []
-  private let lock = NSRecursiveLock(name: "ReactiveKit.ReplaySubject")
-
   public let bufferSize: Int
-  public let disposeBag = DisposeBag()
 
   public init(bufferSize: Int = Int.max) {
     if bufferSize < Int.max {
@@ -75,72 +110,47 @@ public final class ReplaySubject<Element, Error: Swift.Error>: ObserverRegister<
     }
   }
 
-  public func on(_ event: Event<Element, Error>) {
-    lock.atomic {
-      guard !terminated else { return }
-      buffer.append(event)
-      buffer = buffer.suffix(bufferSize)
-      forEachObserver { $0(event) }
-    }
+  public override func send(_ event: Event<Element, Error>) {
+    buffer.append(event)
+    buffer = buffer.suffix(bufferSize)
+    super.send(event)
   }
 
-  public func observe(with observer: @escaping (Event<Element, Error>) -> Void) -> Disposable {
-    return lock.atomic {
-      buffer.forEach(observer)
-      return add(observer: observer)
-    }
-  }
-
-  private var terminated: Bool {
-    if let lastEvent = buffer.last {
-      return lastEvent.isTerminal
-    } else {
-      return false
-    }
+  public override func willAdd(observer: @escaping Observer<Element, Error>) {
+    buffer.forEach(observer)
   }
 }
 
-internal class _ReplayOneSubject<Element, Error: Swift.Error>: ObserverRegister<(Event<Element, Error>) -> Void>, SubjectProtocol {
+/// A subject that replies latest event to each observer.
+public final class ReplayOneSubject<Element, Error: Swift.Error>: Subject<Element, Error> {
 
   private var lastEvent: Event<Element, Error>? = nil
   private var terminalEvent: Event<Element, Error>? = nil
-  private let lock = NSRecursiveLock(name: "ReplayOneSubject")
 
-  public override init() {
-  }
-
-  public func on(_ event: Event<Element, Error>) {
-    lock.atomic {
-      guard terminalEvent == nil else { return }
-      if event.isTerminal {
-        terminalEvent = event
-      } else {
-        lastEvent = event
-      }
-      forEachObserver { $0(event) }
+  public override func send(_ event: Event<Element, Error>) {
+    if event.isTerminal {
+      terminalEvent = event
+    } else {
+      lastEvent = event
     }
+    super.send(event)
   }
 
-  public func observe(with observer: @escaping (Event<Element, Error>) -> Void) -> Disposable {
-    return lock.atomic {
-      if let event = lastEvent {
-        observer(event)
-      }
-      if let event = terminalEvent {
-        observer(event)
-      }
-      return add(observer: observer)
+  public override func willAdd(observer: @escaping Observer<Element, Error>) {
+    if let event = lastEvent {
+      observer(event)
+    }
+    if let event = terminalEvent {
+      observer(event)
     }
   }
 }
 
-public final class ReplayOneSubject<Element, Error: Swift.Error>: _ReplayOneSubject<Element, Error> {
-  public let disposeBag = DisposeBag()
-}
 
+@available(*, deprecated, message: "All subjects now inherit 'Subject' that can be used in place of 'AnySubject'.")
 public final class AnySubject<Element, Error: Swift.Error>: SubjectProtocol {
-  private let baseObserve: (@escaping (Event<Element, Error>) -> Void) -> Disposable
-  private let baseOn: (Event<Element, Error>) -> Void
+  private let baseObserve: (@escaping Observer<Element, Error>) -> Disposable
+  private let baseOn: Observer<Element, Error>
 
   public let disposeBag = DisposeBag()
 
@@ -153,38 +163,7 @@ public final class AnySubject<Element, Error: Swift.Error>: SubjectProtocol {
     return baseOn(event)
   }
 
-  public func observe(with observer: @escaping (Event<Element, Error>) -> Void) -> Disposable {
+  public func observe(with observer: @escaping Observer<Element, Error>) -> Disposable {
     return baseObserve(observer)
-  }
-}
-
-// MARK: ObserverRegister
-
-private class ObserverRegister<Observer> {
-  private typealias Token = Int64
-  private var nextToken: Token = 0
-
-  private var observers: [Token: Observer] = [:]
-  private let tokenLock = SpinLock()
-
-  public init() {}
-
-  public func add(observer: Observer) -> Disposable {
-    tokenLock.lock()
-    let token = nextToken
-    nextToken = nextToken + 1
-    tokenLock.unlock()
-
-    observers[token] = observer
-
-    return BlockDisposable { [weak self] in
-      let _ = self?.observers.removeValue(forKey: token)
-    }
-  }
-
-  public func forEachObserver(_ execute: (Observer) -> Void) {
-    for (_, observer) in observers {
-      execute(observer)
-    }
   }
 }

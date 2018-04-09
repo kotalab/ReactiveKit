@@ -22,7 +22,7 @@
 //  THE SOFTWARE.
 //
 
-// MARK: - ConnectableSignalType
+import Foundation
 
 /// Represents a signal that is started by calling `connect` on it.
 public protocol ConnectableSignalProtocol: SignalProtocol {
@@ -31,35 +31,27 @@ public protocol ConnectableSignalProtocol: SignalProtocol {
   func connect() -> Disposable
 }
 
-// MARK: - RawConnectableSignal
-
 /// Makes a signal connectable through the given subject.
-public final class ConnectableSignal<O: SignalProtocol>: ConnectableSignalProtocol {
+public final class ConnectableSignal<Source: SignalProtocol>: ConnectableSignalProtocol {
 
-  private let source: O
-  private let lock = SpinLock()
-  private let subject: AnySubject<O.Element, O.Error>
-  private var connectionDisposable: Disposable? = nil
+  private let source: Source
+  private let lock = NSRecursiveLock()
+  private let subject: Subject<Source.Element, Source.Error>
 
-  public init(source: O, subject: AnySubject<O.Element, O.Error>) {
+  public init(source: Source, subject: Subject<Source.Element, Source.Error>) {
     self.source = source
     self.subject = subject
   }
 
   /// Start the signal.
   public func connect() -> Disposable {
-    return lock.atomic {
-      if let connectionDisposable = connectionDisposable {
-        return connectionDisposable
-      } else {
-        return source.observe(with: subject.on)
-      }
-    }
+    lock.lock(); defer { lock.unlock() }
+    return source.observe(with: subject)
   }
 
   /// Register an observer that will receive events from the signal.
   /// Note that the events will not be generated until `connect` is called.
-  public func observe(with observer: @escaping (Event<O.Element, O.Error>) -> Void) -> Disposable {
+  public func observe(with observer: @escaping (Event<Source.Element, Source.Error>) -> Void) -> Disposable {
     return subject.observe(with: observer)
   }
 }
@@ -67,13 +59,13 @@ public final class ConnectableSignal<O: SignalProtocol>: ConnectableSignalProtoc
 public extension ConnectableSignalProtocol {
 
   /// Convert connectable signal into the ordinary signal by calling `connect`
-  /// on first subscription and calling dispose when number of observers goes down to zero.
+  /// on the first observation and calling dispose when number of observers goes down to zero.
   public func refCount() -> Signal<Element, Error> {
     var count = 0
     var connectionDisposable: Disposable? = nil
     return Signal { observer in
       count = count + 1
-      let disposable = self.observe(with: observer.observer)
+      let disposable = self.observe(with: observer.on)
       if connectionDisposable == nil {
         connectionDisposable = self.connect()
       }
@@ -82,6 +74,7 @@ public extension ConnectableSignalProtocol {
         count = count - 1
         if count == 0 {
           connectionDisposable?.dispose()
+          connectionDisposable = nil
         }
       }
     }
@@ -91,22 +84,24 @@ public extension ConnectableSignalProtocol {
 extension SignalProtocol {
 
   /// Ensure that all observers see the same sequence of elements. Connectable.
-  public func replay(_ limit: Int = Int.max) -> ConnectableSignal<Self> {
-    if limit == 1 {
-      return ConnectableSignal(source: self, subject: AnySubject(base: ReplayOneSubject()))
+  public func replay(limit: Int = Int.max) -> ConnectableSignal<Self> {
+    if limit == 0 {
+      return ConnectableSignal(source: self, subject: PublishSubject())
+    } else if limit == 1 {
+      return ConnectableSignal(source: self, subject: ReplayOneSubject())
     } else {
-      return ConnectableSignal(source: self, subject: AnySubject(base: ReplaySubject(bufferSize: limit)))
+      return ConnectableSignal(source: self, subject: ReplaySubject(bufferSize: limit))
     }
   }
 
   /// Convert signal to a connectable signal.
   public func publish() -> ConnectableSignal<Self> {
-    return ConnectableSignal(source: self, subject: AnySubject(base: PublishSubject()))
+    return ConnectableSignal(source: self, subject: PublishSubject())
   }
 
   /// Ensure that all observers see the same sequence of elements.
   /// Shorthand for `replay(limit).refCount()`.
   public func shareReplay(limit: Int = Int.max) -> Signal<Element, Error> {
-    return replay(limit).refCount()
+    return replay(limit: limit).refCount()
   }
 }
